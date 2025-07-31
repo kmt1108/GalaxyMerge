@@ -5,9 +5,9 @@ using UnityEngine;
 public class PlanetPooling: MonoBehaviour
 {
     const string PLANET_PATH = "Planet/";
-    private List<Planet>[] planetPool = new List<Planet>[9];
-    private List<Planet>[] planetActive = new List<Planet>[9];
-    private GameObject[] planetPrefabs = new GameObject[9];
+    private List<Planet>[] planetPool = new List<Planet>[10];
+    private List<Planet>[] planetActive = new List<Planet>[10];
+    private GameObject[] planetPrefabs = new GameObject[10];
     private void Awake()
     {
         Planet.OnHidden += OnPlanetHidden;

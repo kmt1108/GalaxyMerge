@@ -1,12 +1,42 @@
 using DG.Tweening;
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.EventSystems;
 public enum GameState { Playing, Lose }
 public class GameManager : MonoBehaviour
 {
+    public static int Score { get; set; } = 0;
+    public static int SunCount { 
+        get
+        {
+            return PlayerPrefs.GetInt("SunCount", 0);
+        } 
+        set
+        {
+            PlayerPrefs.SetInt("SunCount", value);
+        }
+    }
+    public static int BestScore { 
+        get
+        {
+            return PlayerPrefs.GetInt("BestScore", 0);
+        } 
+        set
+        {
+            PlayerPrefs.SetInt("BestScore", value);
+        }
+    }
+    //declare const score array for each planet index
+    int[] scoreEarned= new int[9] { 2, 3, 5, 9, 17, 33, 65, 129, 257};
+
     public static GameManager instance;
     public static GameState state;
+    public static Action<int> OnScoreChanged;
+    public static Action<int> OnBestScoreChanged;
+    public static Action<int> OnSunCountChanged;
     [SerializeField] PlanetPooling planetPool;
     [SerializeField] AnimationCurve curve;
     [Range(0f, 0.1f)]
@@ -14,12 +44,12 @@ public class GameManager : MonoBehaviour
     [SerializeField] Color normalColor,warningColor;
     public GameObject[] listTrajectory;
     public Transform targetPos,launchPos,nextPos;
+    [SerializeField] Transform sunTrs,sunCountTrs;
     private Vector2 forceToAdd;
     private Planet currentPlanet;
     private float currentMass;
     private Planet nextPlanet;
     private SpriteRenderer targetSprite;
-    private GameObject[] planetPrefabs=new GameObject[9];
     Rigidbody2D rb;
     TargetJoint2D joint;
     bool draggable = true;
@@ -37,53 +67,82 @@ public class GameManager : MonoBehaviour
         Planet.OnPlanetMerge += (index, position) =>
         {
             // Handle planet merge logic here
-            Debug.Log($"Planet {index} merged at position {position}");
-            planetPool.GetPlanet(index+1, position, targetPos.position, true);
+            planetPool.GetPlanet(index+1, position, targetPos.position, true).PlayVFX();
+            Score += scoreEarned[index];
+            OnScoreChanged?.Invoke(Score);
+            if (Score > BestScore)
+            {
+                BestScore = Score;
+                OnBestScoreChanged?.Invoke(BestScore);
+            }
+            if (index == 8)
+            {
+                var pos = targetPos.position;
+                pos.z = -5;
+                var target = Camera.main.ScreenToWorldPoint(sunCountTrs.position);
+                sunTrs.position = pos;
+                sunTrs.localScale = Vector3.one;
+                sunTrs.gameObject.SetActive(true);
+                sunTrs.DOScale(0.1f, 1f).SetDelay(1);
+                sunTrs.DOMove(target, 1f).SetDelay(1).OnComplete(() =>
+                {
+                    SunCount++;
+                    OnSunCountChanged?.Invoke(SunCount);
+                    sunTrs.gameObject.SetActive(false);
+                    sunTrs.DOKill();
+                });
+            }
         };
         launchPosInScreen = Camera.main.WorldToScreenPoint(launchPos.position);
         targetSprite = targetPos.GetComponent<SpriteRenderer>();
         Planet.OnWarning += OnWarningPlanet;
-        Planet.OnWarningCountChanged += OnWarningCountChanged;
+        Planet.OnWarningStart += OnWarningStart;
+        Planet.OnWarningEnded += OnWarningEnded;
     }
-
-    private void OnWarningCountChanged(int count)
+    private void OnWarningStart(Planet planet)
     {
-        if (count == 1)
+        listWarning.Add(planet);
+        if (listWarning.Count == 1)
         {
             StartWarning();
         }
-        else if (count == 0)
+    }
+    private void OnWarningEnded(Planet planet)
+    {
+        listWarning.Remove(planet);
+        if (listWarning.Count == 0)
         {
             StopWarning();
         }
     }
-    private void StopWarning(bool isLose=false)
-    {
-        sequence?.Pause();
-        targetSprite.color = isLose?warningColor:normalColor;
-    }
-    Sequence sequence;
+    Tween warningTween;
     private void StartWarning()
     {
-        targetSprite.color = normalColor;
-        if (sequence != null)
+        if (warningTween == null)
         {
-            sequence.Restart();
+            warningTween = targetSprite.DOColor(warningColor, 0.5f)
+                .SetLoops(-1, LoopType.Yoyo)
+                .SetAutoKill(false);
         }
         else
         {
-            sequence = DOTween.Sequence();
-            sequence.Append(targetSprite.DOColor(warningColor, 0.5f).SetLoops(-1, LoopType.Yoyo).SetEase(Ease.InOutSine));
+            warningTween.Rewind(false);
+            warningTween.Play();
         }
+        warningTween.timeScale = 1;
     }
-
+    private void StopWarning(bool isLose=false)
+    {
+        warningTween.Pause();
+        targetSprite.color = isLose ? warningColor : normalColor;
+    }
     private void OnWarningPlanet(Planet planet, float timeWarning)
     {
         if (!listWarning.Contains(planet))
         {
             listWarning.Add(planet);
         }
-        sequence.timeScale = listWarning[0].WarningTime;
+        if(listWarning.Count>0) warningTween.timeScale = listWarning[0].WarningTime;
     }
     public void LoseGame()
     {
@@ -100,14 +159,19 @@ public class GameManager : MonoBehaviour
         state = GameState.Playing;
         StopWarning();
         planetPool.StoreAllPlanets();
+        Score = 0;
+        OnScoreChanged?.Invoke(Score);
+        OnSunCountChanged?.Invoke(SunCount);
         SpawnCurrentPlanet();
         SpawnNextPlanet();
     }
     void Update()
     {
+        if(warningTween!=null) Debug.Log($"Tween active: {warningTween.timeScale}");
         if (state != GameState.Playing) return;
         if (Input.GetMouseButtonDown(0) && draggable)
         {
+            if (EventSystem.current.IsPointerOverGameObject()) return;
             isDragging = true;
             rb = currentPlanet.Rb;
             joint = currentPlanet.Joint;
@@ -182,6 +246,6 @@ public class GameManager : MonoBehaviour
 
     private int RandomplanetIndex()
     {
-        return UnityEngine.Random.Range(0, 4);
+        return UnityEngine.Random.Range(0, 5);
     }
 }

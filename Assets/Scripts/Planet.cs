@@ -2,10 +2,10 @@
 using UnityEngine;
 public class Planet : MonoBehaviour
 {
-    public static int WarningCount = 0;
     public static Action<Planet, float> OnWarning;
     public static Action<Planet> OnHidden;
-    public static Action<int> OnWarningCountChanged;
+    public static Action<Planet> OnWarningStart;
+    public static Action<Planet> OnWarningEnded;
     public static Action<int, Vector3> OnPlanetMerge;
     private Rigidbody2D rb;
     private TargetJoint2D joint;
@@ -19,6 +19,15 @@ public class Planet : MonoBehaviour
     public float WarningTime => timeTrigger;
     private bool checkTrigger = false;
     bool isWarning;
+    ParticleSystem appearVfx;
+    public void PlayVFX()
+    {
+        if (appearVfx == null)
+        {
+            appearVfx = GetComponentInChildren<ParticleSystem>();
+        }
+        if (appearVfx != null) appearVfx.Play();
+    }
     private void Update()
     {
         if (checkTrigger&&GameManager.state==GameState.Playing)
@@ -28,14 +37,14 @@ public class Planet : MonoBehaviour
             {
                 if (!isWarning) {
                     isWarning = true;
-                    WarningCount++;
-                    OnWarningCountChanged?.Invoke(WarningCount);
+                    OnWarningStart?.Invoke(this);
                 }
                 OnWarning?.Invoke(this, timeTrigger);
                 warning.SetActive(true);
             }
             if (timeTrigger >= 5)
             {
+                OnWarningEnded?.Invoke(this);
                 GameManager.instance.LoseGame();
             }
         }
@@ -56,10 +65,6 @@ public class Planet : MonoBehaviour
     }
     public void Reset()
     {
-        checkTrigger = false;
-        timeTrigger = 0f;
-        isWarning = false;
-        warning.SetActive(false);
         rb.simulated = false;
         joint.enabled = false;
         gameObject.SetActive(false);
@@ -101,8 +106,7 @@ public class Planet : MonoBehaviour
             if (isWarning)
             {
                 isWarning = false;
-                WarningCount--;
-                OnWarningCountChanged?.Invoke(WarningCount);
+                OnWarningEnded?.Invoke(this);
                 warning.SetActive(false);
             }
             checkTrigger = false;
